@@ -1,0 +1,15 @@
+services:
+  ocr-confidetialai:
+    build: .
+    container_name: ocr-confidetialai
+    volumes:
+      # BIND MOUNT: Lo que edites en tu VS Code se refleja aquí
+      - ./:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    networks:
+      - ocr_confidentialai_network
+
+networks:
+  ocr_confidentialai_network:
+    name: ocr_confidentialai_network

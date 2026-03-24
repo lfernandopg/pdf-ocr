@@ -1,0 +1,8 @@
+# PyMuPDF para manipular el PDF y convertirlo a imagen
+PyMuPDF
+
+# Motor de inferencia ligero (reemplaza a paddlepaddle)
+rapidocr_onnxruntime
+
+# Dependencias de soporte
+opencv-python-headless
