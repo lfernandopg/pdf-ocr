@@ -5,6 +5,7 @@ import logging
 import re
 import os
 import difflib
+import unicodedata
 from collections import Counter
 from rapidocr_onnxruntime import RapidOCR
 
@@ -23,22 +24,24 @@ class LegalDocumentProcessor:
     def _preprocess_image(self, img):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
-        # [NUEVO] Engrosamos ligeramente las letras para que el OCR no se salte textos finos o grises
-        kernel = np.ones((2, 2), np.uint8)
-        gray = cv2.erode(gray, kernel, iterations=1)
+        # [NUEVO] CLAHE: Aumenta el contraste dramáticamente. 
+        # Ideal para resaltar letras tenues dentro de recuadros grises sombreados.
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(gray)
         
-        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, otsu = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         black_ratio = np.sum(otsu == 0) / otsu.size
         
         if black_ratio > 0.15:
             logger.debug(f"Imagen ruidosa (Densidad: {black_ratio:.1%}). Limpiando...")
-            denoised = cv2.fastNlMeansDenoising(gray, h=10)
+            denoised = cv2.fastNlMeansDenoising(enhanced, h=10)
             return cv2.adaptiveThreshold(
                 denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 6
             )
         
         logger.debug(f"Imagen limpia (Densidad: {black_ratio:.1%}). Procesando directo...")
-        return gray
+        # En lugar de solo grayscale, pasamos la imagen con el contraste realzado
+        return enhanced
 
     def _get_structured_text(self, ocr_results, line_threshold=15):
         """Ordena las cajas de texto espacialmente y las unifica."""
@@ -116,6 +119,9 @@ class LegalDocumentProcessor:
 
 def calculate_accuracy(expected_text: str, generated_text: str):
     def normalize(text):
+        # [NUEVO] Quita acentos (página -> pagina, INSTRUCCIÓN -> instruccion)
+        text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('utf-8')
+        # Quita puntuación y pasa a minúsculas
         return re.sub(r'[^\w\s]', '', text.lower())
 
     norm_expected = normalize(expected_text)
@@ -127,22 +133,18 @@ def calculate_accuracy(expected_text: str, generated_text: str):
     missing_words = []
     matches = 0
     
-    # Unimos todo el texto generado para buscar sub-cadenas (Resuelve el problema de "Destinoexhorto")
     joined_generated = "".join(generated_words)
     
     for word in expected_words:
-        # 1. Buscamos si la palabra está sola
         if word in generated_words:
             matches += 1
-            generated_words.remove(word) # La consumimos para no contarla doble
-        # 2. Buscamos si el OCR la pegó accidentalmente a otra palabra
+            generated_words.remove(word) 
         elif word in joined_generated:
             matches += 1
             joined_generated = joined_generated.replace(word, "", 1)
         else:
             missing_words.append(word)
 
-    # Solo usamos el Acierto de Palabras, porque el Fuzzy Match no sirve si el orden cambia
     word_accuracy = (matches / len(expected_words)) * 100 if expected_words else 0
 
     return missing_words, word_accuracy
